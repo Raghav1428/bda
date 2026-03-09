@@ -1,0 +1,267 @@
+(.venv) PS C:\Users\Raghav\Desktop\BDA-Project> python main.py
+
+######################################################################
+#
+#  Scalable Cross-City Distributed Framework for
+#  Short-Term AQI Forecasting Using Apache Spark
+#  and Ensemble Learning
+#
+#  >>> NEXT-DAY FORECASTING <<<
+#
+######################################################################
+
+[STEP 1/9] Creating Spark session...
+WARNING: Using incubator modules: jdk.incubator.vector
+Using Spark's default log4j profile: org/apache/spark/log4j2-defaults.properties
+Setting default log level to "WARN".
+To adjust logging level use sc.setLogLevel(newLevel). For SparkR, use setLogLevel(newLevel).
+
+[STEP 2/9] Loading dataset...
+[INFO] Loaded data from HDFS: hdfs://localhost:9000/user/aqi_project/data/india_air_quality.csv
+[INFO] Total rows: 435742, Columns: 13
+
+[STEP 3/9] Running preprocessing pipeline...
+
+============================================================
+ PREPROCESSING PIPELINE
+============================================================
+[INFO] Renamed 'rspm' → 'pm10' (RSPM = PM10 in Indian datasets)
+[INFO] Cast 'so2' from StringType → DoubleType (NA → null)
+[INFO] Cast 'no2' from StringType → DoubleType (NA → null)
+[INFO] Cast 'pm10' from StringType → DoubleType (NA → null)
+[INFO] Cast 'pm2_5' from StringType → DoubleType (NA → null)
+[INFO] Cast 'spm' from StringType → DoubleType (NA → null)
+[INFO] Imputed 'so2' missing values with median = 8.00
+[INFO] Imputed 'no2' missing values with median = 21.70
+[INFO] Imputed 'pm10' missing values with median = 89.00
+[INFO] Imputed 'pm2_5' missing values with median = 32.00
+[INFO] Computed AQI column using CPCB sub-index breakpoints (max rule) — pure SQL, no UDF
+[INFO] Dropped 0 rows with null AQI (435742 remaining)
+[INFO] IQR outlier removal on 'AQI': Q1=60.0, Q3=122.3, IQR=62.3, bounds=[-33.4, 215.7]
+[INFO] Removed 15547 outlier rows (420195 remaining)
+[INFO] Dropped 7 rows with unparseable dates
+[INFO] Extracted temporal features: year, month, day
+[INFO] Using 'location' column as 'city' for partitioning
+[INFO] Preprocessing complete. Final shape: 420188 rows, 18 columns
+============================================================
+
+
+[STEP 4/9] Running feature engineering pipeline...
+
+============================================================
+ FEATURE ENGINEERING PIPELINE
+============================================================
+[INFO] Created AQI_target = lead(AQI, 1) — next-day forecasting target
+[INFO] Dropped 304 rows with no future AQI (419884 remaining)
+[INFO] Added lag features: AQI_lag1, AQI_lag24
+[INFO] Added rolling mean: AQI_rolling_24 (24-row backward window)
+[INFO] Added cyclic encoding: month_sin, month_cos
+[INFO] Added interaction features: pm25_x_so2, no2_x_pm10
+[INFO] Dropped 7234 rows with null features (412650 remaining)
+26/03/02 18:19:57 WARN SparkStringUtils: Truncated the string representation of a plan since it was too large. This behavior can be adjusted by setting 'spark.sql.debug.maxToStringFields'.
+[INFO] Applied StandardScaler to feature vector
+[INFO] Assembled 13 features into 'features' vector
+============================================================
+
+[INFO] Feature-engineered dataset: 412650 rows
+
+[STEP 5/9] Splitting data chronologically and training models...
+[INFO] Unique years in dataset: 1987–2015 (29 years)
+[INFO] Total rows: 412650
+[INFO] Chronological split (target row ratio=0.8, min_test_years=2)
+[INFO]   Train years: 1987–2013 (27 years)
+[INFO]   Test  years: 2014–2015 (2 years)
+[INFO]   Train: 322105 rows (78.1%)
+[INFO]   Test:  90545 rows (21.9%)
+
+============================================================
+ MODEL TRAINING
+============================================================
+
+[MODEL] Training LinearRegression...
+26/03/02 18:20:06 WARN InstanceBuilder: Failed to load implementation from:dev.ludovic.netlib.blas.JNIBLAS
+[MODEL] LinearRegression trained in 5.17s
+[MODEL]   Coefficients: [0.08621183 0.         6.63471832 0.         0.39288553]... (showing first 5)
+[MODEL]   Intercept: 95.8138
+
+[MODEL] Training RandomForestRegressor...
+26/03/02 18:20:16 WARN DAGScheduler: Broadcasting large task binary with size 1259.2 KiB
+26/03/02 18:20:18 WARN DAGScheduler: Broadcasting large task binary with size 2.2 MiB
+26/03/02 18:20:21 WARN DAGScheduler: Broadcasting large task binary with size 4.2 MiB
+26/03/02 18:20:25 WARN DAGScheduler: Broadcasting large task binary with size 1242.2 KiB
+26/03/02 18:20:26 WARN DAGScheduler: Broadcasting large task binary with size 8.1 MiB
+26/03/02 18:20:30 WARN DAGScheduler: Broadcasting large task binary with size 2.4 MiB
+26/03/02 18:20:32 WARN DAGScheduler: Broadcasting large task binary with size 15.7 MiB
+26/03/02 18:20:38 WARN DAGScheduler: Broadcasting large task binary with size 4.7 MiB
+[MODEL] RandomForestRegressor trained in 30.74s
+
+[MODEL] Training GBTRegressor...
+26/03/02 18:21:22 WARN DAGScheduler: Broadcasting large task binary with size 1000.5 KiB
+26/03/02 18:21:22 WARN DAGScheduler: Broadcasting large task binary with size 1003.2 KiB
+26/03/02 18:21:22 WARN DAGScheduler: Broadcasting large task binary with size 1003.7 KiB
+26/03/02 18:21:22 WARN DAGScheduler: Broadcasting large task binary with size 1004.7 KiB
+26/03/02 18:21:22 WARN DAGScheduler: Broadcasting large task binary with size 1005.4 KiB
+26/03/02 18:21:22 WARN DAGScheduler: Broadcasting large task binary with size 1007.8 KiB
+[MODEL] GBTRegressor trained in 42.98s
+
+----------------------------------------
+ Training Time Summary
+----------------------------------------
+  LinearRegression          : 5.17s
+  RandomForest              : 30.74s
+  GBTRegressor              : 42.98s
+============================================================
+
+
+[STEP 6/9] PRIMARY TEMPORAL FORECASTING EVALUATION...
+
+======================================================================
+  PRIMARY EVALUATION — TEMPORAL NEXT-DAY AQI FORECASTING
+  Train: historical years | Test: future years (chrono split)
+======================================================================
+
+============================================================
+ MODEL EVALUATION
+============================================================
+
+  Test set AQI_target statistics:
+    Mean : 92.94
+    Std  : 39.45
+    Range: [20.0, 215.0]
+  (Use Std to gauge error scale: RMSE/Std ≈ normalised error)
+
+  [LinearRegression] Evaluation Results:
+    RMSE : 24.7540
+    MAE  : 17.2914
+    MAPE : 20.07%
+    R²   : 0.6063
+
+  [RandomForest] Evaluation Results:
+    RMSE : 24.4894
+    MAE  : 17.0925
+    MAPE : 19.82%
+    R²   : 0.6147
+
+  [GBTRegressor] Evaluation Results:
+    RMSE : 24.6788
+    MAE  : 17.2430
+    MAPE : 19.86%
+    R²   : 0.6087
+
+============================================================
+
+[STEP 7/9] Extracting feature importance...
+
+[INFO] Feature importance saved to: C:\Users\Raghav\Desktop\BDA-Project\results\feature_importance.csv 
+[INFO] Top 5 features:
+    AQI_rolling_24       : 0.432126
+    pm10                 : 0.249725
+    AQI_lag1             : 0.177329
+    no2_x_pm10           : 0.054319
+    AQI_lag24            : 0.040669
+
+[STEP 8/9] Cross-city validation SKIPPED (flag disabled).
+  Set RUN_CROSS_CITY_VALIDATION = True in main.py to enable.
+
+[STEP 9/9] Training LSTM baseline...
+
+============================================================
+ LSTM BASELINE TRAINING (Non-Distributed)
+============================================================
+[LSTM] Converted to Pandas: X shape=(412650, 13), y shape=(412650,)
+[LSTM] Created sequences: X_seq shape=(412626, 24, 13), y_seq shape=(412626,)
+[LSTM] Train: 330100 sequences | Test: 82526 sequences
+C:\Users\Raghav\Desktop\BDA-Project\.venv\Lib\site-packages\keras\src\layers\rnn\rnn.py:199: UserWarning: Do not pass an `input_shape`/`input_dim` argument to a layer. When using Sequential models, prefer using an `Input(shape)` object as the first layer in the model instead.
+  super().__init__(**kwargs)
+Model: "sequential"
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+┃ Layer (type)                         ┃ Output Shape                ┃         Param # ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+│ lstm (LSTM)                          │ (None, 24, 64)              │          19,968 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout (Dropout)                    │ (None, 24, 64)              │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ lstm_1 (LSTM)                        │ (None, 32)                  │          12,416 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dropout_1 (Dropout)                  │ (None, 32)                  │               0 │
+├──────────────────────────────────────┼─────────────────────────────┼─────────────────┤
+│ dense (Dense)                        │ (None, 1)                   │              33 │
+└──────────────────────────────────────┴─────────────────────────────┴─────────────────┘
+ Total params: 32,417 (126.63 KB)
+ Trainable params: 32,417 (126.63 KB)
+ Non-trainable params: 0 (0.00 B)
+Epoch 1/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 69s 7ms/step - loss: 0.4409 - mae: 0.4750 - val_loss: 0.3976 - val_mae: 0.4379
+Epoch 2/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 69s 7ms/step - loss: 0.4264 - mae: 0.4644 - val_loss: 0.3947 - val_mae: 0.4349
+Epoch 3/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 74s 8ms/step - loss: 0.4195 - mae: 0.4595 - val_loss: 0.3937 - val_mae: 0.4308
+Epoch 4/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 75s 8ms/step - loss: 0.4130 - mae: 0.4545 - val_loss: 0.3927 - val_mae: 0.4329
+Epoch 5/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 75s 8ms/step - loss: 0.4066 - mae: 0.4499 - val_loss: 0.3900 - val_mae: 0.4242
+Epoch 6/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 77s 8ms/step - loss: 0.4015 - mae: 0.4462 - val_loss: 0.3915 - val_mae: 0.4281
+Epoch 7/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 75s 8ms/step - loss: 0.3976 - mae: 0.4436 - val_loss: 0.3905 - val_mae: 0.4222
+Epoch 8/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 76s 8ms/step - loss: 0.3938 - mae: 0.4413 - val_loss: 0.3934 - val_mae: 0.4250
+Epoch 9/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 78s 8ms/step - loss: 0.3906 - mae: 0.4394 - val_loss: 0.3917 - val_mae: 0.4244
+Epoch 10/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 77s 8ms/step - loss: 0.3874 - mae: 0.4376 - val_loss: 0.3927 - val_mae: 0.4214
+Epoch 11/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 76s 8ms/step - loss: 0.3841 - mae: 0.4358 - val_loss: 0.3940 - val_mae: 0.4243
+Epoch 12/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 75s 8ms/step - loss: 0.3813 - mae: 0.4341 - val_loss: 0.3946 - val_mae: 0.4243
+Epoch 13/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 76s 8ms/step - loss: 0.3788 - mae: 0.4326 - val_loss: 0.3971 - val_mae: 0.4240
+Epoch 14/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 75s 8ms/step - loss: 0.3766 - mae: 0.4316 - val_loss: 0.3990 - val_mae: 0.4253
+Epoch 15/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 75s 8ms/step - loss: 0.3742 - mae: 0.4302 - val_loss: 0.3979 - val_mae: 0.4241
+Epoch 16/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 76s 8ms/step - loss: 0.3725 - mae: 0.4294 - val_loss: 0.3986 - val_mae: 0.4247
+Epoch 17/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 75s 8ms/step - loss: 0.3708 - mae: 0.4281 - val_loss: 0.4002 - val_mae: 0.4246
+Epoch 18/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 73s 8ms/step - loss: 0.3696 - mae: 0.4278 - val_loss: 0.4013 - val_mae: 0.4247
+Epoch 19/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 72s 8ms/step - loss: 0.3680 - mae: 0.4270 - val_loss: 0.4003 - val_mae: 0.4238
+Epoch 20/20
+9285/9285 ━━━━━━━━━━━━━━━━━━━━ 71s 8ms/step - loss: 0.3664 - mae: 0.4263 - val_loss: 0.4011 - val_mae: 0.4274
+[LSTM] Training completed in 1490.02s
+
+[LSTM] Evaluation Results:
+    RMSE : 27.1646
+    MAE  : 19.4140
+    MAPE : 22.74%
+    R²   : 0.4224
+    Time : 1490.02s
+============================================================
+
+
+[INFO] All metrics saved to: C:\Users\Raghav\Desktop\BDA-Project\results\metrics_output.csv
+
+==========================================================================================
+ MODEL COMPARISON TABLE
+==========================================================================================
+Model                     |       RMSE |        MAE |   MAPE (%) |         R² |   Time (s)
+------------------------------------------------------------------------------------------
+LinearRegression          |    24.7540 |    17.2914 |      20.07 |     0.6063 |       5.17
+RandomForest              |    24.4894 |    17.0925 |      19.82 |     0.6147 |      30.74
+GBTRegressor              |    24.6788 |    17.2430 |      19.86 |     0.6087 |      42.98
+LSTM                      |    27.1646 |    19.4140 |      22.74 |     0.4224 |    1490.02
+==========================================================================================
+
+
+######################################################################
+#  PIPELINE COMPLETE — Total time: 1630.15s
+#  Primary metrics saved to: C:\Users\Raghav\Desktop\BDA-Project\results\metrics_output.csv
+#  Feature importance saved to: C:\Users\Raghav\Desktop\BDA-Project\results\feature_importance.csv     
+######################################################################
+
+[INFO] Spark session stopped.
+SUCCESS: The process with PID 38876 (child process of PID 19228) has been terminated.
+SUCCESS: The process with PID 19228 (child process of PID 19044) has been terminated.
+SUCCESS: The process with PID 19044 (child process of PID 20732) has been terminated.
