@@ -1,0 +1,3 @@
+/.venv
+/deep_learning/__pycache__
+/spark_pipeline/__pycache__

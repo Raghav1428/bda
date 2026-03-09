@@ -1,0 +1,14 @@
+feature,importance
+AQI_rolling_24,0.432126
+pm10,0.249725
+AQI_lag1,0.177329
+no2_x_pm10,0.054319
+AQI_lag24,0.040669
+day,0.019568
+no2,0.008433
+month_cos,0.005122
+so2,0.00439
+month,0.003056
+pm25_x_so2,0.003055
+month_sin,0.002207
+pm2_5,0.0
